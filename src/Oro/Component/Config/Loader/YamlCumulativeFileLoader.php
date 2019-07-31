@@ -2,10 +2,10 @@
 
 namespace Oro\Component\Config\Loader;
 
+use Oro\Component\Config\CumulativeResource;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
-// TODO: Override CumulativeFileLoader::isResourceFresh to check also imported files
 class YamlCumulativeFileLoader extends CumulativeFileLoader
 {
     /**
@@ -62,5 +62,40 @@ class YamlCumulativeFileLoader extends CumulativeFileLoader
             $e->setParsedFile($file);
             throw new \InvalidArgumentException(sprintf('Unable to parse file "%s".', $file), $e->getCode(), $e);
         }
+    }
+    
+    public function isResourceFresh($bundleClass, $bundleDir, $bundleAppDir, CumulativeResource $resource, $timestamp)
+    {
+        $resourcesToCheck = $this->addImportedResourcesFrom($resource);
+
+        foreach($resourcesToCheck as $resourceToCheck) {
+
+            if (!parent::isResourceFresh($bundleClass, $bundleDir, $bundleAppDir, $resource, $timestamp)) {
+
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function addImportedResourcesFrom(CumulativeResource $resource, $resources = [])
+    {
+        $file = $resource->getResource();
+        $parent = new \SplFileInfo($file);
+        $resources[] = $resource;
+        $configData = Yaml::parse(file_get_contents($file)) ?: [];
+        if (array_key_exists('imports', $configData) && is_array($configData['imports'])) {
+            foreach($configData['imports'] as $importData) {
+                if (array_key_exists('resource', $importData)) {
+                    $import = new \SplFileInfo($parent->getPath() . DIRECTORY_SEPARATOR . $importData['resource']);
+                    $importPath = $import->getRealPath();
+                    $cumulativeResource = new CumulativeResource($importPath, new CumulativeResourceLoaderCollection());
+                    $resources =  array_merge_recursive($resources, $this->addImportedResourcesFrom($cumulativeResource, $resources));
+                }
+            }
+        }
+
+        return $resources;
     }
 }
